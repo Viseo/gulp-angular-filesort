@@ -1,113 +1,137 @@
 'use strict';
 
-var through = require('through2');
-var ngDep = require('ng-dependencies');
-var toposort = require('toposort');
-var gutil = require('gulp-util');
-var PluginError = gutil.PluginError;
+const _ = require('lodash');
+const gutil = require('gulp-util');
+const minimatch = require('minimatch');
+const ngDep = require('ng-dependencies');
+const through = require('through2');
+const toposort = require('toposort');
 
-var PLUGIN_NAME = 'gulp-angular-filesort';
-var ANGULAR_MODULE = 'ng';
+const PluginError = gutil.PluginError;
 
-module.exports = function angularFilesort() {
-  var files = [];
-  var ngModules = {};
-  var toSort = [];
+const PLUGIN_NAME = 'gulp-angular-filesort';
+const NG = 'ng';
 
-  function transformFunction(file, encoding, next) {
+function createSorter(patterns) {
+  const opt = { matchBase: true, nocase: true };
+  const max = patterns.length;
+
+  function getSortRank(file) {
+    const path = file.path;
+    // matches the first pattern and return its index.
+    const i = _.findIndex(patterns, pattern => minimatch(path, pattern, opt));
+    return i >= 0 ? i : max;
+  }
+
+  return (a, b) => getSortRank(a) - getSortRank(b);
+}
+
+module.exports = function (options = {}) {
+  const { patterns = [] } = options;
+
+  // Create a sorter function for user preferencies
+  const sorter = createSorter(patterns);
+
+  // Stores non Angular files
+  const files = [];
+  // Stores modules graph ([module file path, parent module id])
+  const tuples = [];
+  // Stores modules ({ file: File, attachments: File[] }) by id
+  const idsMap = {};
+  // Stores modules ({ file: File, attachments: File[] }) by file path
+  const pathsMap = {};
+
+  function getModule(name) {
+    if (_.has(idsMap, name)) { return idsMap[name]; }
+    return idsMap[name] = { attachments: [] };
+  }
+
+  function transform(file, encoding, next) {
+    const error = err => this.emit('error', new PluginError(PLUGIN_NAME, err));
 
     // Fail on empty files
     if (file.isNull()) {
-      this.emit('error', new PluginError(PLUGIN_NAME, 'File: "' + file.relative + '" without content. You have to read it with gulp.src(..)'));
+      error(
+        'File: "'
+        + file.relative
+        + '" without content. You have to read it with gulp.src(..)'
+      );
       return;
     }
 
     // Streams not supported
     if (file.isStream()) {
-      /* jshint validthis:true */
-      this.emit('error', new PluginError(PLUGIN_NAME, 'Streaming not supported'));
+      error('Streaming not supported');
       next();
       return;
     }
 
-    var deps;
     try {
-      deps = ngDep(file.contents);
-    } catch (err) {
-      this.emit('error', new PluginError(PLUGIN_NAME, 'Error in parsing: "' + file.relative + '", ' + err.message));
+      var deps = ngDep(file.contents);
+    }
+    catch (err) {
+      // Fail on malformed files
+      error('Error in parsing: "' + file.relative + '", ' + err.message);
       return;
     }
 
-    if (deps.modules) {
-      // Store references to each file with a declaration:
-      Object.keys(deps.modules).forEach(function(name) {
-        ngModules[name] = file;
-      });
+    const { modules = {}, dependencies = [] } = deps;
+
+    // Not an Angular file
+    if (_.isEmpty(dependencies) && _.isEmpty(modules)) {
+      files.push(file);
+      next();
+      return;
     }
 
-    if (deps.dependencies) {
-      // Add each file with dependencies to the array to sort:
-      deps.dependencies.forEach(function(dep) {
-        if (isDependecyUsedInAnyDeclaration(dep, deps)) {
-          return;
-        }
-        if (dep === ANGULAR_MODULE) {
-          return;
-        }
-        toSort.push([file, dep]);
-      });
-    }
-
-    files.push(file);
-    next();
-
-  }
-
-  function flushFunction(next) {
-
-    // Convert all module names to actual files with declarations:
-    for (var i = 0; i < toSort.length; i++) {
-      var moduleName = toSort[i][1];
-      var declarationFile = ngModules[moduleName];
-      if (declarationFile) {
-        toSort[i][1] = declarationFile;
-      } else {
-        // Depending on module outside stream (possibly a 3rd party one),
-        // don't care when sorting:
-        toSort.splice(i--, 1);
-      }
-    }
-
-    // Sort files alphabetically first to prevent random reordering.
-    // Reverse sorting as it is reversed later on.
-    files.sort(function (a, b) {
-        if(a.path.toLowerCase().replace(a.extname, '') < b.path.toLowerCase().replace(b.extname, '')) return 1;
-        if(a.path.toLowerCase().replace(a.extname, '') > b.path.toLowerCase().replace(b.extname, '')) return -1;
-        return 0;
+    // Add modules to the maps
+    _.each(modules, (dependencies, name) => {
+      const module = getModule(name);
+      pathsMap[file.path] = module;
+      module.file = file;
     });
 
-    // Sort `files` with `toSort` as dependency tree:
-    toposort.array(files, toSort)
-      .reverse()
-      .forEach(function(file) {
-        this.push(file);
-      }.bind(this));
+    // Add dependencies to where they belong
+    _.each(dependencies, name => {
+      const dependencyIn = array => _.includes(array, name);
+      // Do nothing if Angular NG module or declared in same file
+      if (name === NG || dependencyIn(modules)) { return; }
+      // If it is a module dependency, then it is a module
+      if (_.some(modules, dependencyIn)) { tuples.push([file.path, name]); }
+      // If not, then it is attached to an existing module
+      else { getModule(name).attachments.push(file); }
+    });
 
     next();
   }
 
-  return through.obj(transformFunction, flushFunction);
+  function flush(next) {
+    _.chain(idsMap)
+      // Get not declared modules
+      .filter(module => !module.file)
+      // Get their attachments
+      .flatMap(module => module.attachments)
+      // Add regular files, and sort by user preferencies
+      .thru(values => values.concat(files).sort(sorter))
+      // Push files to the stream
+      .each(file => this.push(file))
+      .value();
 
+    _.chain(tuples)
+      // Exclude external dependencies
+      .filter(tuple => _.has(idsMap, tuple[1]))
+      // Map tuples items to mapped modules
+      .map(tuple => [pathsMap[tuple[0]], idsMap[tuple[1]]])
+      // Sort modules and reverse to get the correct injection order
+      .thru(values => toposort(values).reverse())
+      // Get an array of modules files sorted by user preferencies
+      .flatMap(module => [module.file].concat(module.attachments.sort(sorter)))
+      // Push files to the stream
+      .each(file => this.push(file))
+      .value();
+
+    next();
+  }
+
+  return through.obj(transform, flush);
 };
-
-function isDependecyUsedInAnyDeclaration(dependency, ngDeps) {
-  if (!ngDeps.modules) {
-    return false;
-  }
-  if (dependency in ngDeps.modules) {
-    return true;
-  }
-  return Object.keys(ngDeps.modules).some(function(module) {
-    return ngDeps.modules[module].indexOf(dependency) > -1;
-  });
-}

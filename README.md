@@ -30,7 +30,7 @@ var angularFilesort = require('gulp-angular-filesort'),
 
 gulp.src('./src/app/index.html')
   .pipe(inject(
-    gulp.src(['./src/app/**/*.js']).pipe(angularFilesort())
+    gulp.src(['./src/app/**/*.js']).pipe(angularFilesort(/* { patterns: minimatchPatterns[] } */))
   ))
   .pipe(gulp.dest('./build'));
 ```
