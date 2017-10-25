@@ -32,7 +32,7 @@ function sort(files, checkResults, handleError) {
   });
 
   stream.on('data', function (file) {
-    resultFiles.push(file.relative);
+    resultFiles.push(file.relative.split(path.sep).join('/'));
   });
 
   stream.on('end', function () {
