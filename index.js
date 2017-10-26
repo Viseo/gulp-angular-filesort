@@ -104,6 +104,7 @@ module.exports = function (options = {}) {
       // If it is a module dependency, then it is a module
       if (_.some(modules, dependencyIn)) {
         graph.push([file.path, id]);
+        // Mark the parent module as not standalone
         standaloneMap[id] = false;
         delete standaloneMap[id];
       }
@@ -127,14 +128,6 @@ module.exports = function (options = {}) {
       // Run the chain
       .value();
 
-    _.chain(standaloneMap)
-      // Get modules declaration and attached files sorted by user patterns
-      .flatMap(module => [module.file].concat(module.files.sort(sorter)))
-      // Push files to the stream
-      .each(file => this.push(file))
-      // Run the chain
-      .value();
-
     _.chain(graph)
       // Map graph items to mapped modules
       .map(tuple => [pathsMap[tuple[0]], idsMap[tuple[1]]])
@@ -142,6 +135,8 @@ module.exports = function (options = {}) {
       .thru(toposort)
       // Remove unknown/external dependencies
       .compact()
+      // Add standalone modules to the chain
+      .concat(_.toArray(standaloneMap))
       // Get modules declaration and attached files sorted by user patterns
       .flatMap(module => module.files.sort(sorter).concat(module.file))
       // Remove duplicates keeping only first occurrences
