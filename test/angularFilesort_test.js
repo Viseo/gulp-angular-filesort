@@ -50,16 +50,15 @@ describe('gulp-angular-filesort', function () {
   it('should sort file with a module definition before files that uses it', function (done) {
     var files = [
       fixture('fixtures/another-factory.js'),
-      fixture('fixtures/another.js'),
+      fixture('fixtures/another.js'), // Module
       fixture('fixtures/module-controller.js'),
-      fixture('fixtures/no-deps.js'),
-      fixture('fixtures/module.js'),
-      fixture('fixtures/dep-on-non-declared.js'),
-      fixture('fixtures/yet-another.js')
+      fixture('fixtures/no-deps.js'), // Module
+      fixture('fixtures/module.js'), // Module
+      fixture('fixtures/dep-on-non-declared.js'), // Module
+      fixture('fixtures/yet-another.js') // Module
     ];
 
     sort(files, function (resultFiles) {
-      console.log('""""""""""""""""""""""""""""""""""""""""', resultFiles);
       resultFiles.length.should.equal(7);
       resultFiles.indexOf('fixtures/module-controller.js').should.be.above(resultFiles.indexOf('fixtures/module.js'));
       resultFiles.indexOf('fixtures/yet-another.js').should.be.above(resultFiles.indexOf('fixtures/another.js'));
