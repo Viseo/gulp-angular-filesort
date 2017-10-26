@@ -91,9 +91,10 @@ module.exports = function (options = {}) {
     // Add modules to the maps
     _.each(modules, (dependencies, id) => {
       const module = pathsMap[file.path] = _.set(getModule(id), 'file', file);
-      if (!module.standalone) { return; } // TODO: cleanup
-      const standalone = module.standalone = _.isEmpty(dependencies);
-      if (!standalone) { delete standaloneMap[id]; }
+      if (module.standalone) {
+        const standalone = module.standalone = _.isEmpty(dependencies);
+        if (!standalone) { delete standaloneMap[id]; }
+      }
     });
 
     // Add dependencies to where they belong
