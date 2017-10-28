@@ -1,53 +1,47 @@
 'use strict';
 
 const _ = require('lodash');
-const gutil = require('gulp-util');
 const minimatch = require('minimatch');
 const ngDep = require('ng-dependencies');
+const PluginError = require('gulp-util').PluginError;
 const through = require('through2');
 const toposort = require('toposort');
 
-const PluginError = gutil.PluginError;
-
 const PLUGIN_NAME = 'gulp-angular-filesort';
-const NG = 'ng';
 
-function createSorter(patterns) {
-  const opt = { matchBase: true, nocase: true };
-  const max = patterns.length;
+function createSorter(order = []) {
+  const options = { matchBase: true, nocase: true };
+  const defaultRank = order.length;
 
-  function getSortRank(file) {
+  function getRank(file) {
     const path = file.path;
-    // matches the first pattern and return its index.
-    const i = _.findIndex(patterns, pattern => minimatch(path, pattern, opt));
-    return i >= 0 ? i : max;
+    return _.min(
+      // Get the index of the first matching pattern
+      _.findIndex(order, pattern => minimatch(path, pattern, options)),
+      defaultRank
+    );
   }
 
-  return (a, b) => getSortRank(a) - getSortRank(b);
+  return (fileA, fileB) => getRank(fileA) - getRank(fileB);
 }
 
 module.exports = function (options = {}) {
-  const { patterns = [] } = options;
-
   // Create a sorter function for user patterns
-  const sorter = createSorter(patterns);
+  const sorter = createSorter(options.order);
 
   // Stores non Angular files
   const files = [];
-  // Stores modules graph ([moduleFilePath, parentModuleId])
+  // Stores modules graph ([moduleFilePath: string, parentModuleId: string])
   const graph = [];
-  // Stores modules ({ file, files, standalone }) by id
+  // Stores modules ({ file: File, files: File[] }) by id
   const idsMap = Object.create(null);
-  // Stores modules ({ file, files, standalone }) by file path
+  // Stores modules ({ file: File, files: File[] }) by file path
   const pathsMap = Object.create(null);
   // Stores standalone modules (no dependencies, not depended on)
   const standaloneMap = Object.create(null);
 
   function getModule(id) {
-    return idsMap[id] || (idsMap[id] = standaloneMap[id] = {
-      standalone: true,
-      files: []
-    });
+    return idsMap[id] || (idsMap[id] = { files: [] });
   }
 
   function transform(file, encoding, next) {
@@ -71,7 +65,7 @@ module.exports = function (options = {}) {
     }
 
     try {
-      var deps = ngDep(file.contents);
+      var angular = ngDep(file.contents);
     }
     catch (err) {
       // Fail on malformed files
@@ -79,7 +73,7 @@ module.exports = function (options = {}) {
       return;
     }
 
-    const { modules = {}, dependencies = [] } = deps;
+    const { modules = {}, dependencies = [] } = angular;
 
     // Not an Angular file
     if (_.isEmpty(modules) && _.isEmpty(dependencies)) {
@@ -91,25 +85,21 @@ module.exports = function (options = {}) {
     // Add modules to the maps
     _.each(modules, (dependencies, id) => {
       const module = pathsMap[file.path] = _.set(getModule(id), 'file', file);
-      if (module.standalone) {
-        const standalone = module.standalone = _.isEmpty(dependencies);
-        if (!standalone) { delete standaloneMap[id]; }
-      }
+      // The module has no dependencies so it is standalone
+      if (_.isEmpty(dependencies)) { standaloneMap[id] = module; }
     });
 
     // Add dependencies to where they belong
     _.each(dependencies, id => {
-      const dependencyIn = array => _.includes(array, id);
       // Do nothing if Angular NG module or declared in same file
-      if (id === NG || dependencyIn(modules)) { return; }
+      if (id === 'ng' || _.has(modules, id)) { return; } // FIXME
       // If it is a module dependency, then it is a module
-      if (_.some(modules, dependencyIn)) {
+      if (_.some(modules, dependencies => _.includes(dependencies, id))) {
         graph.push([file.path, id]);
-        // Mark the parent module as not standalone
-        standaloneMap[id] = false;
+        // The module is depended on so it is not standalone
         delete standaloneMap[id];
       }
-      // If not, then it is attached to an existing module
+      // If not, then it is an attachment to an existing module
       else { getModule(id).files.push(file); }
     });
 
@@ -137,12 +127,12 @@ module.exports = function (options = {}) {
       // Remove unknown/external dependencies
       .compact()
       // Add standalone modules to the chain
-      .concat(_.toArray(standaloneMap))
+      .concat(_.values(standaloneMap))
       // Get modules declaration and attached files sorted by user patterns
       .flatMap(module => module.files.sort(sorter).concat(module.file))
       // Remove duplicates keeping only first occurrences
       .uniq()
-      // Get the expected injection order (see toposort's documentation)
+      // Get the expected injection order (see the toposort documentation)
       .reverse()
       // Push files to the stream
       .each(file => this.push(file))
