@@ -87,6 +87,8 @@ module.exports = function (options = {}) {
       const module = pathsMap[file.path] = _.set(getModule(id), 'file', file);
       // The module has no dependencies so it is standalone
       if (_.isEmpty(dependencies)) { standaloneMap[id] = module; }
+      // In case the module is declared again with dependencies
+      else { delete standaloneMap[id]; }
     });
 
     // Add dependencies to where they belong
@@ -113,14 +115,14 @@ module.exports = function (options = {}) {
       // Get their attached files
       .flatMap(module => module.files)
       // Add regular files and sort by user patterns
-      .thru(value => value.concat(files).sort(sorter))
+      .thru(value => _.concat(value, files).sort(sorter))
       // Push files to the stream
       .each(file => this.push(file))
       // Run the chain
       .value();
 
     _.chain(graph)
-      // Map graph items to mapped modules
+      // Map graph sring items to module objects
       .map(tuple => [pathsMap[tuple[0]], idsMap[tuple[1]]])
       // TODO
       .uniqWith((a, b) => _.isEmpty(_.difference(a, b))) // FIXME
@@ -131,7 +133,7 @@ module.exports = function (options = {}) {
       // Add standalone modules to the chain
       .concat(_.values(standaloneMap))
       // Get modules declaration and attached files sorted by user patterns
-      .flatMap(module => module.files.sort(sorter).concat(module.file))
+      .flatMap(module => _.concat(module.files.sort(sorter), module.file))
       // Remove duplicates keeping only first occurrences
       .uniq()
       // Get the expected injection order (see the toposort documentation)
