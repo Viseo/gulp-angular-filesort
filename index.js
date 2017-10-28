@@ -122,6 +122,8 @@ module.exports = function (options = {}) {
     _.chain(graph)
       // Map graph items to mapped modules
       .map(tuple => [pathsMap[tuple[0]], idsMap[tuple[1]]])
+      // TODO
+      .uniqWith((a, b) => _.isEmpty(_.difference(a, b))) // FIXME
       // Sort modules by dependencies
       .thru(toposort)
       // Remove unknown/external dependencies
