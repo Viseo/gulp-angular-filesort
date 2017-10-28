@@ -33,15 +33,15 @@ module.exports = function (options = {}) {
   const files = [];
   // Stores modules graph ([moduleFilePath: string, parentModuleId: string])
   const graph = [];
-  // Stores modules ({ file: File, files: File[] }) by id
+  // Stores modules ({ file: File[], files: File[] }) by id
   const idsMap = Object.create(null);
-  // Stores modules ({ file: File, files: File[] }) by file path
+  // Stores modules ({ file: File[], files: File[] }) by file path
   const pathsMap = Object.create(null);
   // Stores standalone modules (no dependencies, not depended on)
   const standaloneMap = Object.create(null);
 
   function getModule(id) {
-    return idsMap[id] || (idsMap[id] = { files: [] });
+    return idsMap[id] || (idsMap[id] = { file: [], files: [] });
   }
 
   function transform(file, encoding, next) {
@@ -84,11 +84,13 @@ module.exports = function (options = {}) {
 
     // Add modules to the maps
     _.each(modules, (dependencies, id) => {
-      const module = pathsMap[file.path] = _.set(getModule(id), 'file', file);
+      const module = pathsMap[file.path] = getModule(id);
       // The module has no dependencies so it is standalone
       if (_.isEmpty(dependencies)) { standaloneMap[id] = module; }
       // In case the module is declared again with dependencies
       else { delete standaloneMap[id]; }
+      // Store declaration files (modules should be defined once but...)
+      module.file.push(file);
     });
 
     // Add dependencies to where they belong
@@ -111,7 +113,7 @@ module.exports = function (options = {}) {
   function flush(next) {
     _.chain(idsMap)
       // Get not declared modules
-      .filter(module => !module.file)
+      .filter(module => _.isEmpty(module.file))
       // Get their attached files
       .flatMap(module => module.files)
       // Add regular files and sort by user patterns
