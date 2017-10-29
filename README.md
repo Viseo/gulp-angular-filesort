@@ -10,7 +10,7 @@
 
 > Automatically sort AngularJS app files depending on module definitions and usage
 
-Used in conjunction with [`gulp-inject`](https://www.npmjs.org/package/gulp-inject) to inject your AngularJS application files (scripts) in a correct order, to get rid of all `Uncaught Error: [$injector:modulerr]`.  To work correctly, each angular file needs to have a uniquely named module and setter syntax (with the brackets), i.e. `angular.module('myModule', [])`.
+Used in conjunction with [`gulp-inject`](https://www.npmjs.org/package/gulp-inject) to inject your AngularJS application files (scripts) in a correct order, to get rid of all `Uncaught Error: [$injector:modulerr]`. To work correctly, each angular file needs to have a uniquely named module and setter syntax (with the brackets), i.e. `angular.module('myModule', [])`.
 
 ## Installation
 
@@ -25,17 +25,22 @@ npm install --save-dev gulp-angular-filesort
 ### In your `gulpfile.js`:
 
 ```javascript
-var angularFilesort = require('gulp-angular-filesort'),
-    inject = require('gulp-inject');
+const gulp = require('gulp');
+const inject = require('gulp-inject');
+const angularFilesort = require('gulp-angular-filesort');
 
-gulp.src('./src/app/index.html')
+gulp
+  .src('./src/app/index.html')
   .pipe(inject(
-    gulp.src(['./src/app/**/*.js']).pipe(angularFilesort(/* { patterns: minimatchPatterns[] } */))
+    gulp.src(['./src/app/**/*.js'])
+      .pipe(angularFilesort(/* { attachmentsOrder: minimatchPattern[] } */))
   ))
   .pipe(gulp.dest('./build'));
 ```
 
-**NOTE** Do not use the `read` option for `gulp.src`! This plugin analyzes the contents of each file to determine sort order.
+AngularJS module declaration files will be ordered as expected and their attachment files will come right before them ordered alphabetically or by `attachmentsOrder` that you can control via [minimatch](https://github.com/isaacs/minimatch) patterns.
+
+**NOTE:** Do not use the `read` option for `gulp.src`! This plugin analyzes the contents of each file to determine sort order.
 
 ## License
 
