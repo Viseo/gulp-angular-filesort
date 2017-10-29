@@ -2,7 +2,7 @@
 
 const _ = require('lodash');
 const minimatch = require('minimatch');
-const ngDep = require('ng-dependencies');
+const ngDependencies = require('ng-dependencies');
 const PluginError = require('gulp-util').PluginError;
 const through = require('through2');
 const toposort = require('toposort');
@@ -10,24 +10,28 @@ const toposort = require('toposort');
 const PLUGIN_NAME = 'gulp-angular-filesort';
 
 function createSorter(order = []) {
-  const options = { matchBase: true, nocase: true };
-  const defaultRank = order.length;
+  const options = { matchBase: true };
+  const maxOrder = order.length;
 
-  function getRank(file) {
-    const path = file.path;
-    return _.min(
-      // Get the index of the first matching pattern
-      _.findIndex(order, pattern => minimatch(path, pattern, options)),
-      defaultRank
-    );
+  function getPath(file) { return file.path.toLowerCase(); }
+
+  function getOrder(path) {
+    // Get the index of the first matching pattern
+    const i = _.findIndex(order, pattern => minimatch(path, pattern, options));
+    return _.clamp(i, 0, maxOrder);
   }
 
-  return (fileA, fileB) => getRank(fileA) - getRank(fileB);
+  return (a, b) => {
+    a = getPath(a);
+    b = getPath(b);
+    // Sort by user patterns or alphabetically
+    return getOrder(a) - getOrder(b) || a > b ? 1 : -1;
+  };
 }
 
 module.exports = function (options = {}) {
   // Create a sorter function for user patterns
-  const sorter = createSorter(options.order);
+  const sorter = createSorter(options.attachmentsOrder);
 
   // Stores non Angular files
   const files = [];
@@ -65,15 +69,13 @@ module.exports = function (options = {}) {
     }
 
     try {
-      var angular = ngDep(file.contents);
+      var { modules = {}, dependencies = [] } = ngDependencies(file.contents);
     }
     catch (err) {
       // Fail on malformed files
       error('Error in parsing: "' + file.relative + '", ' + err.message);
       return;
     }
-
-    const { modules = {}, dependencies = [] } = angular;
 
     // Not an Angular file
     if (_.isEmpty(modules) && _.isEmpty(dependencies)) {
@@ -96,7 +98,7 @@ module.exports = function (options = {}) {
     // Add dependencies to where they belong
     _.each(dependencies, id => {
       // Do nothing if Angular NG module or declared in same file
-      if (id === 'ng' || _.has(modules, id)) { return; } // FIXME
+      if (id === 'ng' || _.has(modules, id)) { return; }
       // If it is a module dependency, then it is a module
       if (_.some(modules, dependencies => _.includes(dependencies, id))) {
         graph.push([file.path, id]);
@@ -126,8 +128,8 @@ module.exports = function (options = {}) {
     _.chain(graph)
       // Map graph sring items to module objects
       .map(tuple => [pathsMap[tuple[0]], idsMap[tuple[1]]])
-      // TODO
-      .uniqWith((a, b) => _.isEmpty(_.difference(a, b))) // FIXME
+      // Remove circular dependencies keeping only first occurrences
+      .uniqWith((a, b) => a[0] === b[1] && a[1] === b[0])
       // Sort modules by dependencies
       .thru(toposort)
       // Remove unknown/external dependencies
