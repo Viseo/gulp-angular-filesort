@@ -18,14 +18,14 @@ function createSorter(order = []) {
   function getOrder(path) {
     // Get the index of the first matching pattern
     const i = _.findIndex(order, pattern => minimatch(path, pattern, options));
-    return _.clamp(i, 0, maxOrder);
+    return i < 0 ? maxOrder : i;
   }
 
   return function sorter(a, b) {
     a = getPath(a);
     b = getPath(b);
-    // Sort by user patterns or alphabetically
-    return getOrder(a) - getOrder(b) || a > b ? 1 : -1;
+    // Sort by user patterns or alphabetically (descending order)
+    return getOrder(b) - getOrder(a) || (a > b ? -1 : 1);
   };
 }
 
@@ -119,6 +119,8 @@ module.exports = function gulpAngularFilesort(options = {}) {
       .flatMap(module => module.files)
       // Add regular files and sort by user patterns
       .thru(value => _.concat(value, files).sort(sorter))
+      // Get the expected injection order (see the sorter logic)
+      .reverse()
       // Push files to the stream
       .each(file => this.push(file))
       // Run the chain
